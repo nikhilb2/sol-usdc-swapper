@@ -1,0 +1,37 @@
+# Local Postgres for the swapper's trade log, strategy state, and price history.
+#
+#   docker compose up -d          start
+#   docker compose logs -f db     tail
+#   docker compose down           stop (data survives in the named volume)
+#   docker compose down -v        stop AND delete all data
+#
+# Credentials are interpolated from .env, which is gitignored. Nothing secret
+# belongs in this file — it is committed.
+#
+# Port 5436 rather than the default 5432, which is commonly taken.
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: solswapper-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB:       ${POSTGRES_DB:?set POSTGRES_DB in .env}
+    ports:
+      # Loopback only — this database must not be reachable off-box.
+      - "127.0.0.1:${POSTGRES_PORT:-5436}:5432"
+    volumes:
+      - solswapper-pgdata:/var/lib/postgresql/data
+      # Applied on FIRST start only (empty data dir). `npm run migrate` is the
+      # idempotent path for a volume that already exists.
+      - ./storage/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  solswapper-pgdata:

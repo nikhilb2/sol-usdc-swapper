@@ -1,0 +1,104 @@
+# Non-secret tuning. Changing these is a `kubectl rollout restart` away, and
+# the values are readable in `kubectl describe` — deliberately, so the running
+# strategy is auditable without decoding a secret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sol-swapper-config
+  namespace: nikhil
+data:
+  STRATEGY_ENABLED: "true"
+  # What to accumulate. jupSOL returned 6.30% in SOL terms over the 12 months
+  # to 2026-08-28; jitoSOL 5.80%. See README for why this matters more than
+  # any timing rule.
+  STRATEGY_ASSET: "JUPSOL"
+  STRATEGY_DAILY_USD: "13"
+  STRATEGY_CADENCE: "daily"
+  STRATEGY_MAX_CARRY_USD: "36"
+
+  # Dip boost: when total P&L is negative, the next buy is scaled by
+  # 1 + (drawdown fraction * BOOST_FACTOR), capped at MAX_BOOST. At these
+  # values, down 2% buys 1.20x, down 5% buys 1.50x and nothing beyond that.
+  # This is averaging down, not a timing edge — see the
+  # README. It spends dollars the daily budget never accrued, so spentUsd will
+  # run ahead of accruedUsd; the wallet balance is the only real limit, and an
+  # underfunded wallet just clamps the boosted buy. Set "false" to disable.
+  STRATEGY_BOOST_ON_LOSS: "true"
+  STRATEGY_BOOST_FACTOR: "10"
+  STRATEGY_MAX_BOOST: "1.5"
+
+  # Take-profit: at total P&L >= +PCT, sell FRACTION of the position to USDC,
+  # then not again for COOLDOWN_DAYS. One swap per run, DCA first. Proceeds
+  # stay as USDC. Sized off the whole position but clamped to what is in the
+  # hot wallet. Scored by backtest-takeprofit.js. Set "true" to enable.
+  STRATEGY_TAKE_PROFIT: "false"
+  STRATEGY_TAKE_PROFIT_PCT: "10"
+  STRATEGY_TAKE_PROFIT_FRACTION: "0.10"
+  STRATEGY_TAKE_PROFIT_COOLDOWN_DAYS: "30"
+
+  # Units of STRATEGY_ASSET this wallet held before the bot started, or bought
+  # outside it. The bot never saw those trades, so it cannot know the number.
+  # Declaring it only changes the label on the dashboard's reconciliation line
+  # — "declared opening balance" instead of "unexplained". These units never
+  # enter the P&L or the benchmark either way, having no cost basis the bot
+  # can know. Read the "unexplained" figure off the dashboard, confirm it is
+  # really yours, then set it here.
+  STRATEGY_OPENING_UNITS: "0"
+
+  DASHBOARD_PORT: "8787"
+  # Must be 0.0.0.0 in a container: 127.0.0.1 would refuse the kubelet's
+  # probes and all Service traffic.
+  DASHBOARD_HOST: "0.0.0.0"
+
+  # Set to "true" to make the CronJob quote and log without ever submitting.
+  # Worth running this way for a week before letting it spend real money.
+  DRY_RUN: "false"
+
+  # ── Custody transfer ───────────────────────────────────────────────────────
+  # Sweeping the accumulated jupSOL to a wallet whose key is NOT in this
+  # cluster. The destination lives HERE rather than in the Secret on purpose:
+  # it is a public address, and it is the single most important value in this
+  # deployment to be able to audit without decoding anything. Anyone who could
+  # edit this ConfigMap could edit the Deployment anyway, so keeping it here
+  # costs no real security and buys visibility.
+  #
+  # Because the destination is pinned, a stolen dashboard password cannot
+  # steal: the worst it can do is push the coins into your own safe wallet.
+  # That property is the whole basis for allowing the button at all — do not
+  # make the destination request-supplied without revisiting it.
+  #
+  # This address must be a plain wallet. A token account or PDA derives an
+  # associated token account that no key can ever sign for, and the funds are
+  # gone permanently. Set yours in an overlay (see k8s/README.md); this
+  # placeholder is invalid on purpose. server.js validates it at boot and refuses to start on a
+  # bad value; transfer.js re-checks against the chain before every send.
+  TRANSFER_DESTINATION: "REPLACE_WITH_YOUR_WALLET"
+
+  # Gates the CLI (`node transfer.js`) inside the pod.
+  TRANSFER_ENABLED: "true"
+
+  # Gates the dashboard button. The ingress is public, so leaving this "false"
+  # means the write route does not exist at all for the 364 days a year you
+  # are not moving funds. Flip it, `kubectl rollout restart`, move, flip back.
+  TRANSFER_HTTP_ENABLED: "false"
+
+  # Bound the fee-burn if the dashboard password ever leaks. Enforced against
+  # the trade log, so a pod restart does not reset them.
+  TRANSFER_COOLDOWN_MINUTES: "60"
+  TRANSFER_MAX_PER_DAY: "2"
+  TRANSFER_PRIORITY_FEE: "20000"
+
+  # The exact origin the browser sends, for the CSRF Origin check. Must match
+  # the Ingress host in 05-ingress.yaml. The alert watcher also puts it at the
+  # foot of each Telegram message, as a link back here.
+  DASHBOARD_PUBLIC_ORIGIN: "https://sol.example.com"
+
+  # ── Price alerts ───────────────────────────────────────────────────────────
+  # Read by the watcher (07-alerts.yaml). The Telegram token and chat are not
+  # here: they come from the sol-swapper-telegram Secret.
+  ALERTS_INTERVAL_SECONDS: "60"
+  # A repeating alert re-arms only after price moves back this far past its
+  # target, and fires at most once per cooldown, so a price chopping around
+  # the line does not send a message every minute.
+  ALERTS_REARM_PCT: "1"
+  ALERTS_REPEAT_COOLDOWN_MINUTES: "60"

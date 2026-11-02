@@ -1,0 +1,22 @@
+# kubectl apply -k k8s/
+#
+# The secret is NOT listed here on purpose — it is created by make-secret.sh
+# from your gitignored .env, so no wallet key can be committed by accident.
+#
+# 06-migrate-job.yaml is also excluded: a Job's pod template is immutable, so
+# `apply -k` would fail on every run after the first. Apply it by hand before
+# a rollout that changes the schema — see the header in that file.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: nikhil
+resources:
+  - 02-configmap.yaml
+  - 03-dashboard.yaml
+  - 04-cronjob.yaml
+  - 05-ingress.yaml
+  - 07-alerts.yaml
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/name: sol-swapper
+      app.kubernetes.io/managed-by: kustomize

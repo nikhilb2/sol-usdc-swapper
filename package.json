@@ -1,0 +1,33 @@
+{
+  "name": "sol-usdc-swapper",
+  "version": "1.1.0",
+  "description": "Jupiter-based SOL/LST <-> USDC swapper with a scheduled accumulation strategy",
+  "main": "swap.js",
+  "type": "module",
+  "scripts": {
+    "balance": "node query.js",
+    "swap": "node swap.js",
+    "pl": "node pl.js",
+    "run": "node run.js",
+    "explain": "node run.js --explain",
+    "report": "node report.js",
+    "backtest": "node backtest.js",
+    "migrate": "node migrate.js",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:psql": "docker compose exec db psql -U $POSTGRES_USER -d $POSTGRES_DB",
+    "test": "node pl.test.js && node report.test.js && node strategy.test.js && node state.test.js && node auth.test.js && node transfer.test.js && node alerts.test.js && node postgres.test.js",
+    "dashboard": "node server.js",
+    "transfer": "node transfer.js",
+    "watch": "node watch.js",
+    "alerts": "node alerts-cli.js"
+  },
+  "dependencies": {
+    "@solana/spl-token": "^0.4.9",
+    "@solana/web3.js": "^1.98.0",
+    "bs58": "^6.0.0",
+    "dotenv": "^16.4.7",
+    "node-fetch": "^3.3.2",
+    "pg": "^8.23.0"
+  }
+}

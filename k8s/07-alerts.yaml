@@ -1,0 +1,77 @@
+# The price alert watcher: checks every active alert once a minute and sends
+# the ones that trigger to Telegram.
+#
+# A Deployment rather than a CronJob: a minute-by-minute CronJob would spend
+# most of its life pulling the image and starting Node.
+#
+# Least privilege, on purpose. This pod gets exactly three values from
+# sol-swapper-secrets (DATABASE_URL and JUPITER_API_KEY, never PRIVATE_KEY),
+# and the sol-swapper-telegram secret mounted as-is. So:
+#   - it cannot sign anything; the wallet key is not in its environment
+#   - the dashboard, the internet-facing pod, never holds the Telegram token
+#   - there is one copy of the token. Rotate it in sol-swapper-telegram and
+#     `kubectl rollout restart deploy/sol-swapper-alerts` picks it up.
+#
+# It depends on the price_alerts table: run 06-migrate-job.yaml first. Until
+# then it starts, logs tick_error every minute, and after ten says so on
+# Telegram — loud, but harmless.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sol-swapper-alerts
+  namespace: nikhil
+  labels: { app: sol-swapper, component: alerts }
+spec:
+  # Exactly one. Two watchers would each send every alert.
+  replicas: 1
+  # And never two during a rollout, for the same reason.
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: sol-swapper, component: alerts }
+  template:
+    metadata:
+      labels: { app: sol-swapper, component: alerts }
+    spec:
+      imagePullSecrets:
+        - name: docker-registry-auth
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: watch
+          image: registry.example.com/sol-swapper:latest
+          imagePullPolicy: Always
+          command: ["node", "watch.js"]
+          envFrom:
+            - configMapRef: { name: sol-swapper-config }
+            # TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.
+            - secretRef:    { name: sol-swapper-telegram }
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: sol-swapper-secrets, key: DATABASE_URL } }
+            - name: JUPITER_API_KEY
+              valueFrom: { secretKeyRef: { name: sol-swapper-secrets, key: JUPITER_API_KEY, optional: true } }
+            - name: WATCH_HEARTBEAT
+              value: /tmp/watch.heartbeat
+          # No HTTP server, so liveness is the heartbeat file the loop touches
+          # after every tick, failed ticks included. A stale file means the
+          # loop itself is wedged; a Jupiter or Postgres outage does NOT
+          # restart the pod, since a restart would not fix either.
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "test -n \"$(find /tmp/watch.heartbeat -mmin -5 2>/dev/null)\""]
+            initialDelaySeconds: 120
+            periodSeconds: 60
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 10m,  memory: 96Mi }
+            limits:   { cpu: 200m, memory: 192Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: tmp, emptyDir: {} }

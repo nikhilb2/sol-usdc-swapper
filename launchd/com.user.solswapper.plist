@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Daily accumulation run.
+
+  Install:
+    cp launchd/com.user.solswapper.plist ~/Library/LaunchAgents/
+    # edit the paths below first — launchd has a minimal PATH, so `node` must
+    # be absolute. Find yours with: which node
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.user.solswapper.plist
+
+  Check / remove:
+    launchctl print gui/$(id -u)/com.user.solswapper
+    launchctl bootout gui/$(id -u)/com.user.solswapper
+
+  Notes:
+    - RunAtLoad is false on purpose. Otherwise every login triggers a run; the
+      date guard would catch it, but don't rely on that.
+    - launchd fires once on wake if the scheduled time was missed while asleep.
+      The budget accrues daily regardless, so a missed day is bought later, not lost.
+    - 09:15 local is safely after the previous UTC day's close exists.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.user.solswapper</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/node</string>
+    <string>/ABSOLUTE/PATH/TO/sol-usdc-swapper/run.js</string>
+    <string>--json</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/ABSOLUTE/PATH/TO/sol-usdc-swapper</string>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>9</integer>
+    <key>Minute</key><integer>15</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/ABSOLUTE/PATH/TO/sol-usdc-swapper/data/run.log</string>
+  <key>StandardErrorPath</key>
+  <string>/ABSOLUTE/PATH/TO/sol-usdc-swapper/data/run.err.log</string>
+</dict>
+</plist>

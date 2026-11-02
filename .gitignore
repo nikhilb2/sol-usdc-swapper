@@ -1,0 +1,8 @@
+node_modules/
+.env
+.env.*
+!.env.example
+k8s-local/
+/*.sql
+data/
+npm-debug.log*

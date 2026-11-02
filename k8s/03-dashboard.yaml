@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sol-swapper
+  namespace: nikhil
+  labels: { app: sol-swapper, component: dashboard }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: sol-swapper, component: dashboard }
+  template:
+    metadata:
+      labels: { app: sol-swapper, component: dashboard }
+    spec:
+      imagePullSecrets:
+        - name: docker-registry-auth
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: dashboard
+          image: registry.example.com/sol-swapper:latest
+          imagePullPolicy: Always
+          command: ["node", "server.js"]
+          ports:
+            - { name: http, containerPort: 8787 }
+          envFrom:
+            - configMapRef: { name: sol-swapper-config }
+            - secretRef:    { name: sol-swapper-secrets }
+          # /healthz is unauthenticated and touches nothing external. Probing
+          # / would fail: it returns 401, and httpGet treats any status >= 400
+          # as a failed probe, so liveness would kill the pod forever.
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 25m,  memory: 96Mi }
+            limits:   { cpu: 300m, memory: 320Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: tmp,  mountPath: /tmp }
+      volumes:
+        # Both emptyDir: with Postgres the app writes nothing to disk, but the
+        # root filesystem is read-only so these must exist for the file-backend
+        # fallback and for anything that wants /tmp.
+        - { name: data, emptyDir: {} }
+        - { name: tmp,  emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sol-swapper
+  namespace: nikhil
+  labels: { app: sol-swapper }
+spec:
+  type: ClusterIP
+  selector: { app: sol-swapper, component: dashboard }
+  ports:
+    - { name: http, port: 8787, targetPort: http }

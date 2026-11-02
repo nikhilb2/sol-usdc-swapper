@@ -1,0 +1,71 @@
+# The daily buy. This is what replaces launchd — a CronJob is the natural
+# shape for run.js, which is a short-lived process that exits.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sol-swapper-run
+  namespace: nikhil
+  labels: { app: sol-swapper, component: run }
+spec:
+  # Three attempts a day, not three buys. run.js is idempotent on the UTC date,
+  # so the first successful run buys and the rest see NOT_BOUGHT_TODAY and exit
+  # in about a second. This exists purely so a transient failure at 09:15 — RPC
+  # hiccup, Jupiter 429, wallet briefly unfunded — becomes a delayed buy rather
+  # than a missed day. backoffLimit only retries within seconds, which does not
+  # help when the cause lasts minutes.
+  #
+  # 09:15 IST = 03:45 UTC, well clear of the UTC midnight boundary, so the
+  # local schedule and the UTC idempotency key never disagree about the day.
+  schedule: "15 9,13,17 * * *"
+  timeZone: "Asia/Kolkata"
+
+  # Two runs must never overlap. The Postgres advisory lock already makes the
+  # second one fail safely, but not starting it at all is cleaner.
+  concurrencyPolicy: Forbid
+
+  # If the cluster was down at 09:15, run late rather than skipping: budget
+  # accrues daily, so a missed day is bought later, not lost.
+  startingDeadlineSeconds: 3600
+
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+
+  jobTemplate:
+    spec:
+      # One retry. This is safe by construction: run.js writes a pending intent
+      # before each swap and reconciles it on the next start, so a retry after
+      # a mid-swap crash resolves the previous attempt instead of repeating it.
+      backoffLimit: 1
+      # Don't let a wedged run block tomorrow's.
+      activeDeadlineSeconds: 900
+      ttlSecondsAfterFinished: 259200   # keep pods 3 days for inspection
+      template:
+        spec:
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: docker-registry-auth
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            fsGroup: 1000
+          containers:
+            - name: run
+              image: registry.example.com/sol-swapper:latest
+              imagePullPolicy: Always
+              command: ["node", "run.js", "--json"]
+              envFrom:
+                - configMapRef: { name: sol-swapper-config }
+                - secretRef:    { name: sol-swapper-secrets }
+              resources:
+                requests: { cpu: 25m,  memory: 96Mi }
+                limits:   { cpu: 300m, memory: 320Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              volumeMounts:
+                - { name: data, mountPath: /data }
+                - { name: tmp,  mountPath: /tmp }
+          volumes:
+            - { name: data, emptyDir: {} }
+            - { name: tmp,  emptyDir: {} }

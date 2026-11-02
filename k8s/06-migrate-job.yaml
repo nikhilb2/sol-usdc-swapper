@@ -1,0 +1,57 @@
+# Schema migration. Run this BEFORE rolling out an image that can write a
+# custody transfer.
+#
+#   kubectl -n nikhil delete job sol-swapper-migrate --ignore-not-found
+#   kubectl apply -f k8s/06-migrate-job.yaml
+#   kubectl -n nikhil wait --for=condition=complete job/sol-swapper-migrate --timeout=120s
+#
+# The ordering is not cosmetic. `transactions.type` carries a CHECK constraint,
+# so an unmigrated database rejects a 'transfer_out' insert — and that insert
+# happens AFTER the transfer has already confirmed on chain. The failure mode
+# is the worst one available: the coins have moved, the ledger says nothing,
+# and the wallet never reconciles again. (run.js --resolve-intent can repair
+# it, but do not rely on that.)
+#
+# migrate.js applies storage/schema.sql, which is idempotent — re-running this
+# against an already-migrated database is a no-op, so it is safe to leave in
+# the deploy sequence.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sol-swapper-migrate
+  namespace: nikhil
+  labels: { app: sol-swapper, component: migrate }
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: docker-registry-auth
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: migrate
+          image: registry.example.com/sol-swapper:latest
+          imagePullPolicy: Always
+          command: ["node", "migrate.js"]
+          envFrom:
+            - configMapRef: { name: sol-swapper-config }
+            - secretRef:    { name: sol-swapper-secrets }
+          resources:
+            requests: { cpu: 25m,  memory: 96Mi }
+            limits:   { cpu: 300m, memory: 320Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: tmp,  mountPath: /tmp }
+      volumes:
+        - { name: data, emptyDir: {} }
+        - { name: tmp,  emptyDir: {} }

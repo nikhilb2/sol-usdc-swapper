@@ -1,0 +1,17 @@
+node_modules
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+data
+k8s
+k8s-local
+*.sql
+launchd
+docker-compose.yml
+Dockerfile
+.dockerignore
+*.test.js
+README.md
+npm-debug.log*
